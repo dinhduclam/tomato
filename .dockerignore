@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Frontend
+frontend/node_modules
+frontend/build
+frontend/.env
+
+# Backend
+backend/__pycache__
+backend/static/processed_images/*
+backend/static/uploads/*
+!backend/static/processed_images/.gitkeep
+!backend/static/uploads/.gitkeep
+
+# Environment files
+.env
+.env.local
+
+# Documentation
+README.md
+*.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Batch files (Windows-specific)
+*.bat
+
+# Optional npm cache
+.npm
+
+# Optional REPL history
+.node_repl_history

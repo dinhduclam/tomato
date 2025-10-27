@@ -27,27 +27,49 @@ Hệ thống nhận diện cà chua và phân tích chất lượng sử dụng 
 
 ## 🚀 Cài đặt và chạy
 
-### Yêu cầu hệ thống
+### Cách 1: Sử dụng Docker (Khuyến nghị)
+
+#### Yêu cầu hệ thống
+- Docker
+- Docker Compose
+
+#### Chạy ứng dụng
+```bash
+# Build và chạy container
+docker-compose up --build
+
+# Chạy ở background
+docker-compose up -d
+
+# Dừng container
+docker-compose down
+```
+
+Ứng dụng sẽ chạy tại: `http://localhost:8000`
+
+### Cách 2: Cài đặt thủ công
+
+#### Yêu cầu hệ thống
 - Python 3.8+
 - Node.js 16+
 - npm hoặc yarn
 
-### Backend Setup
+#### Backend Setup
 
 1. **Cài đặt dependencies**:
 ```bash
+cd backend
 pip install -r requirements.txt
 ```
 
 2. **Chạy server**:
 ```bash
-cd backend
 python main.py
 ```
 
 Server sẽ chạy tại: `http://localhost:8000`
 
-### Frontend Setup
+#### Frontend Setup
 
 1. **Cài đặt dependencies**:
 ```bash

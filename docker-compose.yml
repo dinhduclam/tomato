@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  tomato-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tomato-detection-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./static:/app/static
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

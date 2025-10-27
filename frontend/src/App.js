@@ -4,6 +4,9 @@ import axios from 'axios';
 import { saveAs } from 'file-saver';
 import './index.css';
 
+// API base URL - use relative URL in production (Docker), absolute URL in development
+const API_BASE_URL = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000';
+
 function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [processedImage, setProcessedImage] = useState(null);
@@ -69,7 +72,7 @@ function App() {
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      const response = await axios.post('http://localhost:8000/api/v1/detect/tomato', formData, {
+      const response = await axios.post(`${API_BASE_URL}/api/v1/detect/tomato`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -92,7 +95,7 @@ function App() {
   const saveProcessedImage = () => {
     if (processedImage) {
       const link = document.createElement('a');
-      link.href = `http://localhost:8000${processedImage}`;
+      link.href = `${API_BASE_URL}${processedImage}`;
       link.download = 'processed-tomato-image.jpg';
       link.click();
     }
@@ -249,7 +252,7 @@ function App() {
           {processedImage && (
             <div style={{ marginBottom: '20px' }}>
               <img 
-                src={`http://localhost:8000${processedImage}`} 
+                src={`${API_BASE_URL}${processedImage}`} 
                 alt="Processed" 
                 className="image-preview"
               />

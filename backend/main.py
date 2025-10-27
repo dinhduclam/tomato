@@ -1,7 +1,8 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 import cv2
 import numpy as np
 from PIL import Image
@@ -29,8 +30,16 @@ app.add_middleware(
 os.makedirs("static/processed_images", exist_ok=True)
 os.makedirs("static/uploads", exist_ok=True)
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static files (images) - with a different path to avoid conflict with React
+app.mount("/api/static", StaticFiles(directory="static"), name="api_static")
+
+# We'll serve the frontend manually via the catch-all route
+frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "build")
+
+# Mount React build static assets
+static_react_path = os.path.join(frontend_path, "static")
+if os.path.exists(static_react_path):
+    app.mount("/static", StaticFiles(directory=static_react_path), name="static")
 
 class TomatoDetector:
     def __init__(self):
@@ -192,7 +201,7 @@ async def detect_tomato(file: UploadFile = File(...)):
         cv2.imwrite(processed_image_path, result_image)
         
         # Tạo URL cho ảnh đã xử lý
-        processed_image_url = f"/static/processed_images/{unique_id}.jpg"
+        processed_image_url = f"/api/static/processed_images/{unique_id}.jpg"
         
         return JSONResponse(content={
             "success": True,
@@ -208,6 +217,27 @@ async def detect_tomato(file: UploadFile = File(...)):
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+# Catch-all route for React app (must be last)
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str, request: Request):
+    """Serve React app or static assets"""
+    # Don't intercept API routes
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    # Try to serve the requested file from frontend build
+    file_path = os.path.join(frontend_path, full_path)
+    
+    if os.path.isfile(file_path) and os.path.exists(file_path):
+        return FileResponse(file_path)
+    
+    # Otherwise serve index.html for React routing
+    index_path = os.path.join(frontend_path, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    
+    return {"message": "Frontend not built. Please run 'npm run build' in the frontend directory."}
 
 if __name__ == "__main__":
     import uvicorn
