@@ -4,8 +4,17 @@ import axios from 'axios';
 import { saveAs } from 'file-saver';
 import './index.css';
 
-// API base URL - use relative URL in production (Docker), absolute URL in development
-const API_BASE_URL = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000';
+// API base URL - automatically use current domain and port
+const getApiBaseUrl = () => {
+  if (process.env.NODE_ENV === 'production') {
+    // In production (Docker), use relative URL
+    return '';
+  } else {
+    // In development, use current window location
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+};
+const API_BASE_URL = getApiBaseUrl();
 
 function App() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -107,6 +116,8 @@ function App() {
     const csvData = detections.map((detection, index) => ({
       'Tomato ID': index + 1,
       'Confidence': detection.confidence,
+      'Label ID': detection.label_id,
+      'Label Name': detection.label_name,
       'R': detection.rgb_avg.r,
       'G': detection.rgb_avg.g,
       'B': detection.rgb_avg.b,
@@ -286,6 +297,11 @@ function App() {
                     <div className="detail-item">
                       <div className="detail-label">Lycopene</div>
                       <div className="detail-value">{detection.lycopene_estimate}%</div>
+                    </div>
+
+                    <div className="detail-item">
+                      <div className="detail-label">Label</div>
+                      <div className="detail-value">{detection.label_name}</div>
                     </div>
                     
                     <div className="detail-item">

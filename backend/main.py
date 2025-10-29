@@ -2,18 +2,13 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
 import cv2
 import numpy as np
-from PIL import Image
-import io
-import json
 import os
 import uuid
 from datetime import datetime
-import pandas as pd
 from typing import List, Dict, Any
-import base64
+from ultralytics import YOLO
 
 app = FastAPI(title="Tomato Quality Detection API", version="1.0.0")
 
@@ -35,6 +30,7 @@ app.mount("/api/static", StaticFiles(directory="static"), name="api_static")
 
 # We'll serve the frontend manually via the catch-all route
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "build")
+backend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "backend")
 
 # Mount React build static assets
 static_react_path = os.path.join(frontend_path, "static")
@@ -48,63 +44,69 @@ class TomatoDetector:
         self.nms_threshold = 0.4
     
     def detect_tomatoes(self, image: np.ndarray) -> List[Dict[str, Any]]:
-        """
-        Giả lập YOLO detection cho cà chua
-        Trong thực tế, đây sẽ là model YOLO thật
-        """
-        height, width = image.shape[:2]
+        # Load mô hình đã train
+        model = YOLO(os.path.join(backend_path, "model", "best.pt"))
+        results = model.predict(source=image)
+        result = results[0]
+        boxes = result.boxes
+
         detections = []
-        
-        # Giả lập phát hiện 2-4 quả cà chua ngẫu nhiên
-        num_tomatoes = np.random.randint(2, 5)
-        
-        for i in range(num_tomatoes):
-            # Tạo box ngẫu nhiên
-            x1 = np.random.randint(0, width//2)
-            y1 = np.random.randint(0, height//2)
-            x2 = x1 + np.random.randint(50, 150)
-            y2 = y1 + np.random.randint(50, 150)
-            
-            # Đảm bảo box không vượt quá kích thước ảnh
-            x2 = min(x2, width)
-            y2 = min(y2, height)
-            
-            confidence = np.random.uniform(0.6, 0.95)
-            
+
+        for box in boxes:
+            # Tọa độ bounding box (pixel)
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+
+            # Độ tin cậy
+            conf = float(box.conf[0])
+
+            # ID lớp
+            cls = int(box.cls[0])
+
+            # Tên lớp
+            label = result.names[cls]
+
             detections.append({
-                "box": [int(x1), int(y1), int(x2), int(y2)],
-                "confidence": float(confidence)
+                "box": [x1, y1, x2, y2],
+                "confidence": 1,
+                "label_id": cls,
+                "label_name": label
             })
         
         return detections
     
-    def calculate_rgb_average(self, image: np.ndarray, box: List[int]) -> Dict[str, float]:
-        """Tính RGB trung bình trong box"""
-        x1, y1, x2, y2 = box
-        roi = image[y1:y2, x1:x2]
-        
-        if roi.size == 0:
-            return {"r": 0, "g": 0, "b": 0}
-        
-        # Chuyển từ BGR sang RGB
-        roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
-        avg_rgb = np.mean(roi_rgb, axis=(0, 1))
-        
+    def extract_rgb_with_grabcut(self, image: np.ndarray, box: List[int]) -> Dict[str, float]:
+        """
+        Grab cut để cut ra quả cà chua
+        Tính RGB trung bình trong box
+        """
+        rect = box
+        mask = np.zeros(image.shape[:2], np.uint8)
+        bgdModel = np.zeros((1,65), np.float64)
+        fgdModel = np.zeros((1,65), np.float64)
+
+        # Xóa nền bằng GrabCut
+        cv2.grabCut(image, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
+        mask2 = np.where((mask==2)|(mask==0), 0, 1).astype('uint8')
+        result = image * mask2[:, :, np.newaxis]
+
+        # Lấy pixel của đối tượng
+        pixels = result[np.where(mask2 == 1)]
+        r_mean, g_mean, b_mean = np.mean(pixels, axis=0)
         return {
-            "r": float(avg_rgb[0]),
-            "g": float(avg_rgb[1]),
-            "b": float(avg_rgb[2])
+            "r": r_mean,
+            "g": g_mean,
+            "b": b_mean
         }
-    
+
     def estimate_lycopene(self, rgb: Dict[str, float]) -> float:
         """
         Ước tính Lycopene dựa trên RGB
-        Công thức giả lập: Lycopene tỷ lệ thuận với R và tỷ lệ nghịch với G, B
         """
         r, g, b = rgb["r"], rgb["g"], rgb["b"]
         
-        # Công thức giả lập (trong thực tế sẽ phức tạp hơn)
-        lycopene = (r * 0.8 - g * 0.3 - b * 0.2) / 255.0
+
+        x = (2*r-g-b) / (r+g+b)
+        lycopene = 1.1264*x - 0.0359
         lycopene = max(0, min(1, lycopene))  # Clamp between 0 and 1
         
         return round(lycopene * 100, 2)  # Trả về phần trăm
@@ -127,7 +129,7 @@ class TomatoDetector:
             return "Not ready (1-2 weeks)"
         else:
             return "Too early (3+ weeks)"
-    
+
     def draw_detections(self, image: np.ndarray, detections: List[Dict[str, Any]]) -> np.ndarray:
         """Vẽ box và nhãn lên ảnh"""
         result_image = image.copy()
@@ -176,7 +178,7 @@ async def detect_tomato(file: UploadFile = File(...)):
         processed_detections = []
         for detection in detections:
             # Tính RGB trung bình
-            rgb_avg = detector.calculate_rgb_average(image, detection["box"])
+            rgb_avg = detector.extract_rgb_with_grabcut(image, detection["box"])
             
             # Ước tính Lycopene
             lycopene_estimate = detector.estimate_lycopene(rgb_avg)
@@ -187,6 +189,8 @@ async def detect_tomato(file: UploadFile = File(...)):
             processed_detections.append({
                 "box": detection["box"],
                 "confidence": detection["confidence"],
+                "label_id": detection["label_id"],
+                "label_name": detection["label_name"],
                 "rgb_avg": rgb_avg,
                 "lycopene_estimate": lycopene_estimate,
                 "harvest_time_label": harvest_time_label
@@ -195,6 +199,8 @@ async def detect_tomato(file: UploadFile = File(...)):
         # Vẽ kết quả lên ảnh
         result_image = detector.draw_detections(image, processed_detections)
         
+        print("Response:", processed_detections)
+
         # Lưu ảnh đã xử lý
         unique_id = str(uuid.uuid4())
         processed_image_path = f"static/processed_images/{unique_id}.jpg"
