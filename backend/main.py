@@ -45,9 +45,9 @@ class TomatoDetector:
         self.nms_threshold = 0.4
         self.model = YOLO(os.path.join(backend_path, "model", "best.pt"))
     
-    def detect_tomatoes(self, image: np.ndarray) -> List[Dict[str, Any]]:
+    def detect_tomatoes(self, image_rgb: np.ndarray) -> List[Dict[str, Any]]:
         # Load mô hình đã train
-        results = self.model.predict(source=image)
+        results = self.model.predict(source=image_rgb)
         result = results[0]
         boxes = result.boxes
 
@@ -76,23 +76,35 @@ class TomatoDetector:
         print("Detected: ", detections)
         return detections
     
-    def grabcut(self, image: np.ndarray, box: List[int]) -> Dict[str, float]:
+    def grabcut(self, image_rgb: np.ndarray, box: List[int]) -> Dict[str, float]:
         """
         Grab cut để cut ra quả cà chua
         Tính RGB trung bình trong box
         """
-        rect = box
-        mask = np.zeros(image.shape[:2], np.uint8)
+        img_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+        x1, y1, x2, y2 = box
+        w = x2 - x1
+        h = y2 - y1
+        rect = [x1, y1, w, h]
+        mask = np.zeros(img_bgr.shape[:2], np.uint8)
         bgdModel = np.zeros((1,65), np.float64)
         fgdModel = np.zeros((1,65), np.float64)
 
         # Xóa nền bằng GrabCut
-        cv2.grabCut(image, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
-        mask2 = np.where((mask==2)|(mask==0), 0, 1).astype('uint8')
-        result = image * mask2[:, :, np.newaxis]
-
+        cv2.grabCut(img_bgr, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
+        
+        # Tạo Mask Nhị phân từ GrabCut (chỉ giữ lại 1 và 3)
+        # mask_grabcut: 255 cho tiền cảnh, 0 cho nền
+        mask_grabcut = np.where((mask==cv2.GC_FGD) | (mask==cv2.GC_PR_FGD), 255, 0).astype('uint8')
+        
+        # 3. Tạo Mask Nhị phân Giới hạn (từ rect)
+        # mask_rect: 255 cho vùng trong rect, 0 cho vùng ngoài
+        mask_rect = np.zeros(img_bgr.shape[:2], dtype=np.uint8)
+        x, y, w, h = rect
+        mask_rect[y:y+h, x:x+w] = 255
+        mask_final = cv2.bitwise_and(mask_grabcut, mask_rect)
         # Lấy pixel của đối tượng
-        pixels = result[np.where(mask2 == 1)]
+        pixels = image_rgb[np.where(mask_final > 0)]
         r_mean, g_mean, b_mean = np.mean(pixels, axis=0)
         res = {
             "r": 0 if math.isnan(r_mean) else r_mean,
@@ -100,14 +112,14 @@ class TomatoDetector:
             "b": 0 if math.isnan(b_mean) else b_mean
         }
         print("RGB after grabcut: ", res)
-        return mask2
+        return mask_final
 
     
-    def normalize_and_get_avg_rgb(self, image: np.ndarray, mask: np.ndarray):
+    def normalize_and_get_avg_rgb(self, image_rgb: np.ndarray, mask: np.ndarray):
         ## A. Chuẩn hóa Ánh sáng bằng L*a*b* và CLAHE
 
         # 2. Chuyển sang L*a*b* và Tách kênh
-        img_lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+        img_lab = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2LAB)
         L, a, b = cv2.split(img_lab)
 
         # 3. Áp dụng CLAHE lên kênh L (Độ sáng)
@@ -123,7 +135,7 @@ class TomatoDetector:
         ## B. Tính toán Màu RGB Trung bình
         # 6. Chỉ tính toán RGB trung bình trên vùng cà chua (dựa trên mask)
         # Lấy các pixel trong vùng mask
-        pixels = img_normalized_rgb[mask > 0]
+        pixels = img_normalized_rgb[np.where(mask > 0)]
 
         
         r_mean, g_mean, b_mean = np.mean(pixels, axis=0)
@@ -168,30 +180,30 @@ class TomatoDetector:
         else:
             return "Too early (3+ weeks)"
 
-    def draw_detections(self, image: np.ndarray, detections: List[Dict[str, Any]]) -> np.ndarray:
+    def draw_detections(self, image_bgr: np.ndarray, detections: List[Dict[str, Any]]) -> np.ndarray:
         """Vẽ box và nhãn lên ảnh"""
-        result_image = image.copy()
+        result_image_bgr = image_bgr.copy()
         
         for i, detection in enumerate(detections):
             x1, y1, x2, y2 = detection["box"]
             confidence = detection["confidence"]
             
             # Vẽ box
-            cv2.rectangle(result_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.rectangle(result_image_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
             # Vẽ nhãn
             label = f"Tomato {i+1}: {confidence:.2f}"
             label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
             
             # Vẽ background cho text
-            cv2.rectangle(result_image, (x1, y1 - label_size[1] - 10), 
+            cv2.rectangle(result_image_bgr, (x1, y1 - label_size[1] - 10), 
                          (x1 + label_size[0], y1), (0, 255, 0), -1)
             
             # Vẽ text
-            cv2.putText(result_image, label, (x1, y1 - 5), 
+            cv2.putText(result_image_bgr, label, (x1, y1 - 5), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
         
-        return result_image
+        return result_image_bgr
 
 detector = TomatoDetector()
 
@@ -221,7 +233,7 @@ async def detect_tomato(file: UploadFile = File(...)):
 
         # Resize ảnh
         image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         # Phát hiện cà chua
         detections = detector.detect_tomatoes(image)
         
@@ -229,12 +241,13 @@ async def detect_tomato(file: UploadFile = File(...)):
         processed_detections = []
         for detection in detections:
             # Tách quả cà chua
-            mask = detector.grabcut(image, detection["box"])
-            mask2 = mask.astype('uint8')
-            cv2.imwrite(f"static/processed_images/1.jpg", image* mask2[:, :, np.newaxis])
+            mask = detector.grabcut(image_rgb, detection["box"])
+            mask2 = np.where(mask > 0, 1, 0)
+            cv2.imwrite(f"static/processed_images/1.jpg", image * mask2[:, :, np.newaxis])
             # Lab -> extract RGB
-            rgb_avg, normalized_image = detector.normalize_and_get_avg_rgb(image, mask)
-            cv2.imwrite(f"static/processed_images/2.jpg", normalized_image* mask2[:, :, np.newaxis])
+            rgb_avg, normalized_image_rgb = detector.normalize_and_get_avg_rgb(image_rgb, mask)
+            normalized_image_bgr = cv2.cvtColor(normalized_image_rgb, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(f"static/processed_images/2.jpg", normalized_image_bgr* mask2[:, :, np.newaxis])
             # Ước tính Lycopene
             lycopene_estimate = detector.estimate_lycopene(rgb_avg)
             
