@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 from typing import List, Dict, Any
 from ultralytics import YOLO
+import math
 
 app = FastAPI(title="Tomato Quality Detection API", version="1.0.0")
 
@@ -42,11 +43,11 @@ class TomatoDetector:
         # Giả lập YOLO model (thực tế sẽ load model YOLO)
         self.confidence_threshold = 0.5
         self.nms_threshold = 0.4
+        self.model = YOLO(os.path.join(backend_path, "model", "best.pt"))
     
     def detect_tomatoes(self, image: np.ndarray) -> List[Dict[str, Any]]:
         # Load mô hình đã train
-        model = YOLO(os.path.join(backend_path, "model", "best.pt"))
-        results = model.predict(source=image)
+        results = self.model.predict(source=image)
         result = results[0]
         boxes = result.boxes
 
@@ -67,14 +68,15 @@ class TomatoDetector:
 
             detections.append({
                 "box": [x1, y1, x2, y2],
-                "confidence": 1,
+                "confidence": conf,
                 "label_id": cls,
                 "label_name": label
             })
         
+        print("Detected: ", detections)
         return detections
     
-    def extract_rgb_with_grabcut(self, image: np.ndarray, box: List[int]) -> Dict[str, float]:
+    def grabcut(self, image: np.ndarray, box: List[int]) -> Dict[str, float]:
         """
         Grab cut để cut ra quả cà chua
         Tính RGB trung bình trong box
@@ -92,20 +94,56 @@ class TomatoDetector:
         # Lấy pixel của đối tượng
         pixels = result[np.where(mask2 == 1)]
         r_mean, g_mean, b_mean = np.mean(pixels, axis=0)
-        return {
-            "r": r_mean,
-            "g": g_mean,
-            "b": b_mean
+        res = {
+            "r": 0 if math.isnan(r_mean) else r_mean,
+            "g": 0 if math.isnan(g_mean) else g_mean,
+            "b": 0 if math.isnan(b_mean) else b_mean
         }
+        print("RGB after grabcut: ", res)
+        return mask2
+
+    
+    def normalize_and_get_avg_rgb(self, image: np.ndarray, mask: np.ndarray):
+        ## A. Chuẩn hóa Ánh sáng bằng L*a*b* và CLAHE
+
+        # 2. Chuyển sang L*a*b* và Tách kênh
+        img_lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+        L, a, b = cv2.split(img_lab)
+
+        # 3. Áp dụng CLAHE lên kênh L (Độ sáng)
+        # clipLimit: Giới hạn độ tương phản (thường 2.0-4.0)
+        # tileGridSize: Kích thước lưới chia ảnh (thường 8x8)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        L_clahe = clahe.apply(L)
+
+        # 4. Gộp kênh và Chuyển ngược lại BGR
+        img_lab_clahe = cv2.merge([L_clahe, a, b])
+        img_normalized_rgb = cv2.cvtColor(img_lab_clahe, cv2.COLOR_LAB2RGB)
+
+        ## B. Tính toán Màu RGB Trung bình
+        # 6. Chỉ tính toán RGB trung bình trên vùng cà chua (dựa trên mask)
+        # Lấy các pixel trong vùng mask
+        pixels = img_normalized_rgb[mask > 0]
+
+        
+        r_mean, g_mean, b_mean = np.mean(pixels, axis=0)
+        res = {
+            "r": 0 if math.isnan(r_mean) else r_mean,
+            "g": 0 if math.isnan(g_mean) else g_mean,
+            "b": 0 if math.isnan(b_mean) else b_mean,
+        }
+
+        print(f"Màu RGB Trung bình (Đã Chuẩn hóa):", res)
+
+        # Trả về ảnh đã chuẩn hóa (BGR) và giá trị RGB trung bình
+        return res, img_normalized_rgb
 
     def estimate_lycopene(self, rgb: Dict[str, float]) -> float:
         """
         Ước tính Lycopene dựa trên RGB
         """
         r, g, b = rgb["r"], rgb["g"], rgb["b"]
-        
-
-        x = (2*r-g-b) / (r+g+b)
+        x = (2*r-g-b) / (r+g+b+1e-6)
         lycopene = 1.1264*x - 0.0359
         lycopene = max(0, min(1, lycopene))  # Clamp between 0 and 1
         
@@ -170,16 +208,33 @@ async def detect_tomato(file: UploadFile = File(...)):
         
         if image is None:
             raise HTTPException(status_code=400, detail="Invalid image format")
-        
+
+        h, w = image.shape[:2]
+
+        # Xác định tỉ lệ scale
+        if w > h:
+            new_w = 600
+            new_h = int(h * (600 / w))
+        else:
+            new_h = 600
+            new_w = int(w * (600 / h))
+
+        # Resize ảnh
+        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
         # Phát hiện cà chua
         detections = detector.detect_tomatoes(image)
         
         # Xử lý từng detection
         processed_detections = []
         for detection in detections:
-            # Tính RGB trung bình
-            rgb_avg = detector.extract_rgb_with_grabcut(image, detection["box"])
-            
+            # Tách quả cà chua
+            mask = detector.grabcut(image, detection["box"])
+            mask2 = mask.astype('uint8')
+            cv2.imwrite(f"static/processed_images/1.jpg", image* mask2[:, :, np.newaxis])
+            # Lab -> extract RGB
+            rgb_avg, normalized_image = detector.normalize_and_get_avg_rgb(image, mask)
+            cv2.imwrite(f"static/processed_images/2.jpg", normalized_image* mask2[:, :, np.newaxis])
             # Ước tính Lycopene
             lycopene_estimate = detector.estimate_lycopene(rgb_avg)
             
@@ -217,6 +272,7 @@ async def detect_tomato(file: UploadFile = File(...)):
         })
         
     except Exception as e:
+        print(e)
         raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
 
 @app.get("/api/v1/health")

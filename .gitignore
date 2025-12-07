@@ -3,3 +3,4 @@ frontend/package-lock.json
 install_dependencies.bat
 run_backend.bat
 run_frontend.bat
+static
