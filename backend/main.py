@@ -106,13 +106,13 @@ class TomatoDetector:
         # Lấy pixel của đối tượng
         pixels = image_rgb[np.where(mask_final > 0)]
         r_mean, g_mean, b_mean = np.mean(pixels, axis=0)
-        res = {
+        rgb_mean = {
             "r": 0 if math.isnan(r_mean) else r_mean,
             "g": 0 if math.isnan(g_mean) else g_mean,
             "b": 0 if math.isnan(b_mean) else b_mean
         }
-        print("RGB after grabcut: ", res)
-        return mask_final
+        print("RGB after grabcut: ", rgb_mean)
+        return mask_final, rgb_mean
 
     
     def normalize_and_get_avg_rgb(self, image_rgb: np.ndarray, mask: np.ndarray):
@@ -241,24 +241,37 @@ async def detect_tomato(file: UploadFile = File(...)):
         processed_detections = []
         for detection in detections:
             # Tách quả cà chua
-            mask = detector.grabcut(image_rgb, detection["box"])
+            mask, rgb_grabcut = detector.grabcut(image_rgb, detection["box"])
             mask2 = np.where(mask > 0, 1, 0)
-            cv2.imwrite(f"static/processed_images/1.jpg", image * mask2[:, :, np.newaxis])
+            tomato_bef_normalize = image * mask2[:, :, np.newaxis]
             # Lab -> extract RGB
             rgb_avg, normalized_image_rgb = detector.normalize_and_get_avg_rgb(image_rgb, mask)
             normalized_image_bgr = cv2.cvtColor(normalized_image_rgb, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(f"static/processed_images/2.jpg", normalized_image_bgr* mask2[:, :, np.newaxis])
+            tomato_aft_normalize = normalized_image_bgr* mask2[:, :, np.newaxis]
+
             # Ước tính Lycopene
             lycopene_estimate = detector.estimate_lycopene(rgb_avg)
             
             # Ước tính thời gian thu hoạch
             harvest_time_label = detector.estimate_harvest_time(rgb_avg)
             
+            uid = str(uuid.uuid4())
+            bef_path = f"static/processed_images/{uid}_bef.jpg"
+            cv2.imwrite(bef_path, tomato_bef_normalize)
+            aft_path = f"static/processed_images/{uid}_aft.jpg"
+            cv2.imwrite(aft_path, tomato_aft_normalize)
+            
+            bef_url = f"/api/static/processed_images/{uid}_bef.jpg"
+            aft_url = f"/api/static/processed_images/{uid}_aft.jpg"
+
             processed_detections.append({
                 "box": detection["box"],
                 "confidence": detection["confidence"],
                 "label_id": detection["label_id"],
                 "label_name": detection["label_name"],
+                "tomato_before_normalize_url": bef_url,
+                "tomato_after_normalize_url": aft_url,
+                "rgb_grabcut": rgb_grabcut,
                 "rgb_avg": rgb_avg,
                 "lycopene_estimate": lycopene_estimate,
                 "harvest_time_label": harvest_time_label
@@ -276,7 +289,7 @@ async def detect_tomato(file: UploadFile = File(...)):
         
         # Tạo URL cho ảnh đã xử lý
         processed_image_url = f"/api/static/processed_images/{unique_id}.jpg"
-        
+
         return JSONResponse(content={
             "success": True,
             "processed_image_url": processed_image_url,

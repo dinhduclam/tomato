@@ -311,6 +311,58 @@ function App() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Thông tin chi tiết về ảnh và RGB */}
+                  <div className="tomato-comparison">
+                    <h4 className="comparison-title">So sánh trước và sau chuẩn hóa</h4>
+                    <div className="comparison-grid">
+                      <div className="comparison-item">
+                        <div className="comparison-label">Ảnh trước chuẩn hóa</div>
+                        {detection.tomato_before_normalize_url && (
+                          <img 
+                            src={`${API_BASE_URL}${detection.tomato_before_normalize_url}`} 
+                            alt="Trước chuẩn hóa"
+                            className="comparison-image"
+                          />
+                        )}
+                        <div className="rgb-info">
+                          <div className="rgb-label">RGB trung bình (trước)</div>
+                          <div className="rgb-display">
+                            <div 
+                              className="rgb-color" 
+                              style={{ backgroundColor: `rgb(${Math.round(detection.rgb_grabcut.r)}, ${Math.round(detection.rgb_grabcut.g)}, ${Math.round(detection.rgb_grabcut.b)})` }}
+                            ></div>
+                            <span>
+                              {Math.round(detection.rgb_grabcut.r)}, {Math.round(detection.rgb_grabcut.g)}, {Math.round(detection.rgb_grabcut.b)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="comparison-item">
+                        <div className="comparison-label">Ảnh sau chuẩn hóa</div>
+                        {detection.tomato_after_normalize_url && (
+                          <img 
+                            src={`${API_BASE_URL}${detection.tomato_after_normalize_url}`} 
+                            alt="Sau chuẩn hóa"
+                            className="comparison-image"
+                          />
+                        )}
+                        <div className="rgb-info">
+                          <div className="rgb-label">RGB trung bình (sau)</div>
+                          <div className="rgb-display">
+                            <div 
+                              className="rgb-color" 
+                              style={{ backgroundColor: `rgb(${Math.round(detection.rgb_avg.r)}, ${Math.round(detection.rgb_avg.g)}, ${Math.round(detection.rgb_avg.b)})` }}
+                            ></div>
+                            <span>
+                              {Math.round(detection.rgb_avg.r)}, {Math.round(detection.rgb_avg.g)}, {Math.round(detection.rgb_avg.b)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
