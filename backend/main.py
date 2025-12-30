@@ -43,7 +43,7 @@ class TomatoDetector:
         # Giả lập YOLO model (thực tế sẽ load model YOLO)
         self.confidence_threshold = 0.5
         self.nms_threshold = 0.4
-        self.model = YOLO(os.path.join(backend_path, "model", "best.pt"))
+        self.model = YOLO(os.path.join(backend_path, "model", "best2.pt"))
     
     def detect_tomatoes(self, image_rgb: np.ndarray) -> List[Dict[str, Any]]:
         # Load mô hình đã train
